@@ -38,32 +38,25 @@ const MoonIcon = ({ size = 20 }) => (
   </svg>
 );
 
-/* ---- Utility: Check if a record is a profile/medical-form record ---- */
+/* ---- Utility Functions ---- */
 const isProfileRecord = (diagnosis) => {
   if (!diagnosis) return false;
-  // Modern tagged records
   if (diagnosis.includes('[PAST HISTORY]')) return true;
   if (diagnosis.includes('=== PERSONAL INFORMATION ===')) return true;
   if (diagnosis.includes('[PROFILE DELETED]')) return true;
-  // Legacy records saved before the [PAST HISTORY] tag was introduced —
-  // they contain multiple characteristic medical-form field headers together
   const hasMedicalFields =
     diagnosis.includes('Full Name:') &&
     (diagnosis.includes('NIC No:') || diagnosis.includes('Faculty:') || diagnosis.includes('Date of Birth:'));
-  if (hasMedicalFields) return true;
-  return false;
+  return hasMedicalFields;
 };
 
-/* ---- Utility: Parse Profile Status ---- */
 const getProfileStatus = (records) => {
   if (!records || records.length === 0) return { status: 'New', record: null };
   const sorted = [...records].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
   const latestRec = sorted.find(r => r.diagnosis?.includes('[PAST HISTORY]') || r.diagnosis?.includes('[PROFILE DELETED]'));
   if (!latestRec || latestRec.diagnosis?.includes('[PROFILE DELETED]')) return { status: 'New', record: null };
-
   const match = latestRec.diagnosis.match(/Approval Status: (Pending|Approved|Rejected)/);
   const isComplete = latestRec.diagnosis.includes('[FILE_ATTACHMENT:');
-
   return {
     status: match ? match[1] : (isComplete ? 'Pending' : 'Incomplete'),
     record: latestRec,
@@ -72,7 +65,7 @@ const getProfileStatus = (records) => {
 };
 
 /* ---- Custom UI Components ---- */
-const Toast = ({ message, show, onClose }) => {
+const Toast = ({ message, show }) => {
   if (!show && !message) return null;
   return (
     <div className={`uni-toast ${show ? 'show' : ''}`}>
@@ -90,12 +83,8 @@ const ConfirmModal = ({ show, config, onCancel, onConfirm }) => {
         <div className="uni-confirm-icon">⚠️</div>
         <div className="uni-confirm-msg">{config.message}</div>
         <div className="uni-confirm-actions">
-          <button className="uni-confirm-btn cancel" onClick={onCancel}>
-            {config.cancelText || 'Cancel'}
-          </button>
-          <button className="uni-confirm-btn confirm" onClick={onConfirm}>
-            {config.confirmText || 'Confirm'}
-          </button>
+          <button className="uni-confirm-btn cancel" onClick={onCancel}>{config.cancelText || 'Cancel'}</button>
+          <button className="uni-confirm-btn confirm" onClick={onConfirm}>{config.confirmText || 'Confirm'}</button>
         </div>
       </div>
     </div>
@@ -112,6 +101,7 @@ function App() {
   const [showLoginPwd, setShowLoginPwd] = useState(false);
   const [darkMode, setDarkMode] = useState(() => localStorage.getItem('theme') === 'dark');
 
+  /* ---- Forgot Password State ---- */
   const [showForgotPwd, setShowForgotPwd] = useState(false);
   const [forgotStep, setForgotStep] = useState(1);
   const [forgotIndex, setForgotIndex] = useState('');
@@ -119,22 +109,65 @@ function App() {
   const [forgotMsg, setForgotMsg] = useState('');
   const [forgotError, setForgotError] = useState('');
   const [isVerifyingForgot, setIsVerifyingForgot] = useState(false);
+  const [otpCode, setOtpCode] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmNewPassword, setConfirmNewPassword] = useState('');
+  const [showNewPwd, setShowNewPwd] = useState(false);
+  const [showConfirmPwd, setShowConfirmPwd] = useState(false);
+
+  
 
   /* ---- Custom Toast & Confirm State ---- */
   const [toastMessage, setToastMessage] = useState('');
   const [showToast, setShowToast] = useState(false);
   const toastTimeoutRef = useRef(null);
-
   const [confirmConfig, setConfirmConfig] = useState(null);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
+
+  /* ---- New Registration States in App Component ---- */
+  const [showRegister, setShowRegister] = useState(false);
+  const [regStep, setRegStep] = useState(1); 
+  const [regIndex, setRegIndex] = useState('');
+  const [regEmail, setRegEmail] = useState('');
+  const [regOtp, setRegOtp] = useState('');
+  const [regPassword, setRegPassword] = useState('');
+  const [regConfirmPassword, setRegConfirmPassword] = useState('');
+  const [showRegPwd, setShowRegPwd] = useState(false);
+  const [showRegConfirmPwd, setShowRegConfirmPwd] = useState(false);
+  const [isRegLoading, setIsRegLoading] = useState(false);
+
+/* ---- Handler Functions ---- */
+const handleSendOtp = async (e) => {
+  e.preventDefault();
+  if (!regEmail.endsWith('@uom.lk')) {
+    setForgotError("Email must end with @uom.lk");
+    return;
+  }
+  // Logic to call /student/send-otp backend endpoint
+  setRegStep(2);
+};
+
+const handleVerifyRegOtp = (e) => {
+  e.preventDefault();
+  // Add logic to verify OTP via backend
+  setRegStep(3);
+};
+
+const handleFinalRegistration = async (e) => {
+  e.preventDefault();
+  if (regPassword !== regConfirmPassword) {
+    setForgotError("Passwords do not match");
+    return;
+  }
+  // Call backend to create student and set password
+  // On success, navigate to profile/dashboard
+};
 
   const showAlert = useCallback((message) => {
     setToastMessage(message);
     setShowToast(true);
     if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
-    toastTimeoutRef.current = setTimeout(() => {
-      setShowToast(false);
-    }, 5000);
+    toastTimeoutRef.current = setTimeout(() => setShowToast(false), 5000);
   }, []);
 
   const showConfirm = useCallback((message, onConfirmCallback, confirmText = 'Confirm', cancelText = 'Cancel') => {
@@ -147,9 +180,7 @@ function App() {
     setShowConfirmModal(false);
   };
 
-  const handleCancelConfirm = () => {
-    setShowConfirmModal(false);
-  };
+  const handleCancelConfirm = () => setShowConfirmModal(false);
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', darkMode ? 'dark' : 'light');
@@ -216,24 +247,72 @@ function App() {
     }
   };
 
-  const handleForgotSubmit = (e) => {
+  const handleForgotSubmit = async (e) => {
     e.preventDefault();
-    setForgotMsg('');
+    setForgotMsg('Connecting to UniMed mail server...');
     setForgotError('');
-    if (!forgotEmail.endsWith('@uom.lk')) {
-      setForgotError('Security Error: Only @uom.lk university email domains are accepted for password resets.');
-      return;
+
+    try {
+      const res = await fetch(`${API_BASE_URL}/student/send-otp`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ index: forgotIndex, email: forgotEmail })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setForgotMsg(`Code sent to ${forgotEmail}. Please check your inbox.`);
+        setForgotStep(3); // Move to OTP input step
+      } else {
+        setForgotError(data.error || 'Failed to send email.');
+      }
+    } catch {
+      setForgotError('Network error: Could not reach the backend server.');
     }
-    // Simulate sending email
-    setForgotMsg(`A password reset link has been sent to ${forgotEmail}. Please check your inbox.`);
-    setTimeout(() => {
-      setShowForgotPwd(false);
-      setForgotStep(1);
-      setForgotIndex('');
-      setForgotEmail('');
-      setForgotMsg('');
-    }, 5000);
   };
+
+  const handleResetPassword = async (e) => {
+  e.preventDefault();
+  
+  // Validation Check
+  if (newPassword !== confirmNewPassword) {
+    setForgotError("Passwords do not match. Please re-type them.");
+    return;
+  }
+
+  setForgotMsg('Updating your password...');
+  setForgotError('');
+
+  try {
+    const res = await fetch(`${API_BASE_URL}/student/reset-password-with-otp`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ 
+        email: forgotEmail,
+        indexNumber: forgotIndex,
+        otp: otpCode, 
+        newPassword: newPassword 
+      })
+    });
+
+    const data = await res.json();
+
+    if (res.ok) {
+      setForgotMsg('Password reset successful!');
+      setTimeout(() => {
+        setShowForgotPwd(false);
+        setForgotStep(1);
+        setForgotMsg('');
+        setOtpCode('');
+        setNewPassword('');
+        setConfirmNewPassword(''); // Reset new field
+      }, 5000);
+    } else {
+      setForgotError(data.error || 'Failed to reset password.');
+    }
+  } catch (err) {
+    setForgotError('Network error: Could not reach the backend.');
+  }
+};
 
   if (!isLoggedIn) {
     return (
@@ -243,87 +322,98 @@ function App() {
           <div className="shape shape-2"></div>
           <div className="shape shape-3"></div>
         </div>
-
-        {/* Dark mode toggle — top right */}
-        <button
-          className="login-theme-btn"
-          onClick={() => setDarkMode(v => !v)}
-          title={darkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
-        >
+        <button className="login-theme-btn" onClick={() => setDarkMode(v => !v)}>
           {darkMode ? <SunIcon size={19} /> : <MoonIcon size={19} />}
         </button>
 
-        {/* ---- SPLIT LAYOUT ---- */}
         <div className="login-split">
-
-          {/* LEFT — hero / branding panel */}
           <div className="login-hero slide-top">
             <div className="login-hero-inner">
               <div className="hero-badge">🏥 University of Moratuwa</div>
               <h1 className="hero-title">UniMed<span className="logo-dot">.</span></h1>
               <p className="hero-sub">The all-in-one digital health platform for the University Medical Center</p>
-
               <div className="hero-features">
-                <div className="hero-feat">
-                  <span className="feat-icon">🩺</span>
-                  <div>
-                    <div className="feat-title">Doctor Consultations</div>
-                    <div className="feat-desc">Record diagnoses, prescriptions &amp; clinical notes with voice input</div>
-                  </div>
-                </div>
-                <div className="hero-feat">
-                  <span className="feat-icon">🧪</span>
-                  <div>
-                    <div className="feat-title">Lab Reports</div>
-                    <div className="feat-desc">Upload and manage lab results directly to student records</div>
-                  </div>
-                </div>
-                <div className="hero-feat">
-                  <span className="feat-icon">📋</span>
-                  <div>
-                    <div className="feat-title">Student Health Profiles</div>
-                    <div className="feat-desc">Comprehensive medical history, immunisation &amp; family records</div>
-                  </div>
-                </div>
+                <div className="hero-feat"><span className="feat-icon">🩺</span><div><div className="feat-title">Doctor Consultations</div><div className="feat-desc">Record diagnoses with voice input</div></div></div>
+                <div className="hero-feat"><span className="feat-icon">🧪</span><div><div className="feat-title">Lab Reports</div><div className="feat-desc">Direct upload to student records</div></div></div>
+                <div className="hero-feat"><span className="feat-icon">📋</span><div><div className="feat-title">Student Health Profiles</div><div className="feat-desc">Comprehensive medical history</div></div></div>
               </div>
             </div>
           </div>
 
-          {/* RIGHT — login form */}
           <div className="login-form-side">
             <div className="glass-panel login-panel slide-top">
               <div className="login-header">
-                <img
-                  src="/University_of_Moratuwa_logo.png"
-                  alt="University of Moratuwa"
-                  className="uom-logo"
-                />
+                <img src="/University_of_Moratuwa_logo.png" alt="UOM" className="uom-logo" />
                 <h2 className="logo-text" style={{ fontSize: '2rem' }}>UniMed<span className="logo-dot">.</span></h2>
                 <p className="login-subtext">{showForgotPwd ? 'Reset your password' : 'Sign in to your portal'}</p>
               </div>
 
               {showForgotPwd ? (
-                <form onSubmit={forgotStep === 1 ? handleVerifyIndex : handleForgotSubmit} className="login-form fade-in">
+                <form onSubmit={
+                  forgotStep === 1 ? handleVerifyIndex : 
+                  forgotStep === 2 ? handleForgotSubmit : 
+                  handleResetPassword
+                } className="login-form fade-in">
                   
-                  {forgotStep === 1 ? (
+                  {forgotStep === 1 && (
                     <div className="input-group slide-top">
                       <label>Enter Student Index Number</label>
-                      <input
-                        type="text" value={forgotIndex}
-                        onChange={(e) => setForgotIndex(e.target.value)}
-                        placeholder="e.g. 240456R"
-                        required
-                      />
+                      <input type="text" value={forgotIndex} onChange={(e) => setForgotIndex(e.target.value)} placeholder="e.g. 240000R" required />
                     </div>
-                  ) : (
+                  )}
+
+                  {forgotStep === 2 && (
                     <div className="input-group slide-top">
-                      <label>Verified. Now enter your University Email</label>
-                      <input
-                        type="email" value={forgotEmail}
-                        onChange={(e) => setForgotEmail(e.target.value)}
-                        placeholder="e.g. name.24@uom.lk"
-                        required
-                      />
+                      <label>Enter University Email</label>
+                      <input type="email" value={forgotEmail} onChange={(e) => setForgotEmail(e.target.value)} placeholder="e.g. name.24@uom.lk" required />
+                    </div>
+                  )}
+
+                  {forgotStep === 3 && (
+                    <div className="slide-top">
+                      <div className="input-group">
+                        <label>Enter 6-Digit Code</label>
+                        <input 
+                          type="text" 
+                          maxLength="6" 
+                          value={otpCode} 
+                          onChange={(e) => setOtpCode(e.target.value)} 
+                          placeholder="000000" 
+                          required 
+                        />
+                      </div>
+
+                      <div className="input-group">
+                        <label>New Password</label>
+                        <div className="pwd-input-wrap">
+                          <input 
+                            type={showNewPwd ? 'text' : 'password'} 
+                            value={newPassword} 
+                            onChange={(e) => setNewPassword(e.target.value)} 
+                            placeholder="At least 6 characters" 
+                            required 
+                          />
+                          <button type="button" className="pwd-eye-btn" onClick={() => setShowNewPwd(!showNewPwd)} tabIndex={-1}>
+                            {showNewPwd ? <EyeOff /> : <EyeOpen />}
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="input-group">
+                        <label>Confirm New Password</label>
+                        <div className="pwd-input-wrap">
+                          <input 
+                            type={showConfirmPwd ? 'text' : 'password'} 
+                            value={confirmNewPassword} 
+                            onChange={(e) => setConfirmNewPassword(e.target.value)} 
+                            placeholder="Type password again" 
+                            required 
+                          />
+                          <button type="button" className="pwd-eye-btn" onClick={() => setShowConfirmPwd(!showConfirmPwd)} tabIndex={-1}>
+                            {showConfirmPwd ? <EyeOff /> : <EyeOpen />}
+                          </button>
+                        </div>
+                      </div>
                     </div>
                   )}
 
@@ -331,7 +421,9 @@ function App() {
                   {forgotMsg && <p className="success-text bounce-in" style={{color: 'var(--success)', background: 'var(--success-light)', padding: '10px', borderRadius: '8px', fontSize: '0.86rem', textAlign: 'center', marginBottom: '16px', fontWeight: '600', border: '1px solid rgba(16, 185, 129, 0.2)'}}>{forgotMsg}</p>}
                   
                   <button type="submit" className="btn-primary login-submit-btn" disabled={isVerifyingForgot}>
-                    {forgotStep === 1 ? (isVerifyingForgot ? 'Checking...' : 'Verify Student') : 'Send Reset Link'} <span className="arrow">→</span>
+                    {forgotStep === 1 ? (isVerifyingForgot ? 'Checking...' : 'Verify Student') : 
+                     forgotStep === 2 ? 'Send Code' : 
+                     'Reset Password'} <span className="arrow">→</span>
                   </button>
 
                   <div style={{textAlign: 'center', marginTop: '16px'}}>
@@ -343,63 +435,41 @@ function App() {
               ) : (
                 <>
                   <div className="role-selector">
-                {['Student', 'Doctor', 'Lab Assistant'].map(r => (
-                  <button
-                    key={r}
-                    className={`role-btn ${role === r ? 'active' : ''}`}
-                    onClick={() => { setRole(r); setLoginError(''); }}
-                    type="button"
-                  >{r}</button>
-                ))}
-              </div>
-              <form onSubmit={handleLogin} className="login-form">
-                <div className="input-group">
-                  <label>{role === 'Student' ? 'Index Number' : `${role} ID`}</label>
-                  <input
-                    type="text" value={username}
-                    onChange={(e) => setUsername(e.target.value)}
-                    placeholder={`e.g. ${role === 'Student' ? '220001V' : 'M-1234'}`}
-                    required
-                  />
-                </div>
-                <div className="input-group">
-                  <label>Password</label>
-                  <div className="pwd-input-wrap">
-                    <input
-                      type={showLoginPwd ? 'text' : 'password'}
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      placeholder="••••••••"
-                      required
-                    />
-                    <button type="button" className="pwd-eye-btn" onClick={() => setShowLoginPwd(v => !v)} tabIndex={-1}>
-                      {showLoginPwd ? <EyeOff /> : <EyeOpen />}
+                    {['Student', 'Doctor', 'Lab Assistant'].map(r => (
+                      <button key={r} className={`role-btn ${role === r ? 'active' : ''}`} onClick={() => { setRole(r); setLoginError(''); }} type="button">{r}</button>
+                    ))}
+                  </div>
+                  <form onSubmit={handleLogin} className="login-form">
+                    <div className="input-group">
+                      <label>{role === 'Student' ? 'Index Number' : `${role} ID`}</label>
+                      <input type="text" value={username} onChange={(e) => setUsername(e.target.value)} placeholder={`e.g. ${role === 'Student' ? '220001V' : 'M-1234'}`} required />
+                    </div>
+                    <div className="input-group">
+                      <label>Password</label>
+                      <div className="pwd-input-wrap">
+                        <input type={showLoginPwd ? 'text' : 'password'} value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" required />
+                        <button type="button" className="pwd-eye-btn" onClick={() => setShowLoginPwd(v => !v)} tabIndex={-1}>{showLoginPwd ? <EyeOff /> : <EyeOpen />}</button>
+                      </div>
+                    </div>
+                    {loginError && <p className="error-text bounce-in">{loginError}</p>}
+                    {role === 'Student' && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '16px', marginTop: '-6px' }}>
+                        <a href="#" onClick={(e) => { e.preventDefault(); setShowRegister(true); }} style={{ color: 'var(--blue)', fontSize: '0.82rem', textDecoration: 'none', fontWeight: '600' }}>
+                          New Student? Sign up
+                        </a>
+                        <a href="#" onClick={(e) => { e.preventDefault(); setShowForgotPwd(true); }} style={{ color: 'var(--blue)', fontSize: '0.82rem', textDecoration: 'none', fontWeight: '600' }}>
+                          Forgot password?
+                        </a>
+                      </div>
+                    )}
+                    <button type="submit" className="btn-primary login-submit-btn" disabled={isLoggingIn}>
+                      {isLoggingIn ? 'Verifying...' : <>Access Portal <span className="arrow">→</span></>}
                     </button>
-                  </div>
-                </div>
-                {loginError && <p className="error-text bounce-in">{loginError}</p>}
-                
-                {role === 'Student' && (
-                  <div style={{display: 'flex', justifyContent: 'flex-end', marginBottom: '16px', marginTop: '-6px'}}>
-                    <a href="#" onClick={(e) => { e.preventDefault(); setShowForgotPwd(true); setLoginError(''); }} style={{color: 'var(--blue)', fontSize: '0.82rem', textDecoration: 'none', fontWeight: '600'}}>
-                      Forgot password?
-                    </a>
-                  </div>
-                )}
-
-                <button type="submit" className="btn-primary login-submit-btn" disabled={isLoggingIn}>
-                  {isLoggingIn ? 'Verifying...' : <>Access Portal <span className="arrow">→</span></>}
-                </button>
-              </form>
-              </>
-            )}
-
-            <p className="login-footer-note">
-                Protected system — authorised personnel only
-              </p>
+                  </form>
+                </>
+              )}
             </div>
           </div>
-
         </div>
       </div>
     );
@@ -407,13 +477,8 @@ function App() {
 
   return (
     <div className="app-layout">
-      <Toast message={toastMessage} show={showToast} onClose={() => setShowToast(false)} />
-      <ConfirmModal
-        show={showConfirmModal}
-        config={confirmConfig}
-        onCancel={handleCancelConfirm}
-        onConfirm={handleConfirmAction}
-      />
+      <Toast message={toastMessage} show={showToast} />
+      <ConfirmModal show={showConfirmModal} config={confirmConfig} onCancel={handleCancelConfirm} onConfirm={handleConfirmAction} />
       {role === 'Doctor' && <DoctorPortal username={username} handleLogout={handleLogout} showAlert={showAlert} showConfirm={showConfirm} />}
       {role === 'Student' && <StudentPortal indexNumber={username} handleLogout={handleLogout} showAlert={showAlert} showConfirm={showConfirm} />}
       {role === 'Lab Assistant' && <LabPortal username={username} handleLogout={handleLogout} showAlert={showAlert} showConfirm={showConfirm} />}
