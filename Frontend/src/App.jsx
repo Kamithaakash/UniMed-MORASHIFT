@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import './App.css';
 
-const API_BASE_URL = "https://unimed-backend.vercel.app";
+const API_BASE_URL = 'https://unimed-backend.vercel.app';
 
 /* ---- Reusable eye-toggle SVGs ---- */
 const EyeOpen = () => (
@@ -60,10 +60,10 @@ const getProfileStatus = (records) => {
   const sorted = [...records].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
   const latestRec = sorted.find(r => r.diagnosis?.includes('[PAST HISTORY]') || r.diagnosis?.includes('[PROFILE DELETED]'));
   if (!latestRec || latestRec.diagnosis?.includes('[PROFILE DELETED]')) return { status: 'New', record: null };
-  
+
   const match = latestRec.diagnosis.match(/Approval Status: (Pending|Approved|Rejected)/);
   const isComplete = latestRec.diagnosis.includes('[FILE_ATTACHMENT:');
-  
+
   return {
     status: match ? match[1] : (isComplete ? 'Pending' : 'Incomplete'),
     record: latestRec,
@@ -108,8 +108,17 @@ function App() {
   const [password, setPassword] = useState('');
   const [isLoggedIn, setIsLoggedIn] = useState(() => localStorage.getItem('auth_loggedIn') === 'true');
   const [loginError, setLoginError] = useState('');
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [showLoginPwd, setShowLoginPwd] = useState(false);
   const [darkMode, setDarkMode] = useState(() => localStorage.getItem('theme') === 'dark');
+
+  const [showForgotPwd, setShowForgotPwd] = useState(false);
+  const [forgotStep, setForgotStep] = useState(1);
+  const [forgotIndex, setForgotIndex] = useState('');
+  const [forgotEmail, setForgotEmail] = useState('');
+  const [forgotMsg, setForgotMsg] = useState('');
+  const [forgotError, setForgotError] = useState('');
+  const [isVerifyingForgot, setIsVerifyingForgot] = useState(false);
 
   /* ---- Custom Toast & Confirm State ---- */
   const [toastMessage, setToastMessage] = useState('');
@@ -158,19 +167,72 @@ function App() {
     localStorage.removeItem('lab_last_search');
   };
 
-  const handleLogin = (e) => {
+  const handleLogin = async (e) => {
     e.preventDefault();
     setLoginError('');
-    const defaults = { 'Doctor': 'doctor123', 'Lab Assistant': 'lab123', 'Student': 'student123' };
-    const stored = localStorage.getItem(`pwd_${role}`);
-    const correct = stored || defaults[role];
-    if (password === correct) {
-      setIsLoggedIn(true);
-      localStorage.setItem('auth_loggedIn', 'true');
-      localStorage.setItem('auth_role', role);
-      localStorage.setItem('auth_username', username);
+    setIsLoggingIn(true);
+    let endpoint = '';
+    if (role === 'Student') endpoint = `/student/${username}/login`;
+    else if (role === 'Doctor') endpoint = `/doctors/${username}/login`;
+    else if (role === 'Lab Assistant') endpoint = `/labassistant/${username}/login`;
+
+    try {
+      const res = await fetch(`${API_BASE_URL}${endpoint}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setIsLoggedIn(true);
+        localStorage.setItem('auth_loggedIn', 'true');
+        localStorage.setItem('auth_role', role);
+        localStorage.setItem('auth_username', username);
+      } else {
+        setLoginError(data.error || 'Incorrect password or credentials.');
+      }
+    } catch {
+      setLoginError('Network error. Is the local backend running?');
+    } finally {
+      setIsLoggingIn(false);
     }
-    else setLoginError('Incorrect password or credentials.');
+  };
+
+  const handleVerifyIndex = async (e) => {
+    e.preventDefault();
+    setForgotError('');
+    setIsVerifyingForgot(true);
+    try {
+      const res = await fetch(`${API_BASE_URL}/student/${forgotIndex}`);
+      if (res.ok) {
+        setForgotStep(2);
+      } else {
+        setForgotError('Student record not found. Please register first.');
+      }
+    } catch {
+      setForgotError('Network error connecting to the server.');
+    } finally {
+      setIsVerifyingForgot(false);
+    }
+  };
+
+  const handleForgotSubmit = (e) => {
+    e.preventDefault();
+    setForgotMsg('');
+    setForgotError('');
+    if (!forgotEmail.endsWith('@uom.lk')) {
+      setForgotError('Security Error: Only @uom.lk university email domains are accepted for password resets.');
+      return;
+    }
+    // Simulate sending email
+    setForgotMsg(`A password reset link has been sent to ${forgotEmail}. Please check your inbox.`);
+    setTimeout(() => {
+      setShowForgotPwd(false);
+      setForgotStep(1);
+      setForgotIndex('');
+      setForgotEmail('');
+      setForgotMsg('');
+    }, 5000);
   };
 
   if (!isLoggedIn) {
@@ -237,9 +299,50 @@ function App() {
                   className="uom-logo"
                 />
                 <h2 className="logo-text" style={{ fontSize: '2rem' }}>UniMed<span className="logo-dot">.</span></h2>
-                <p className="login-subtext">Sign in to your portal</p>
+                <p className="login-subtext">{showForgotPwd ? 'Reset your password' : 'Sign in to your portal'}</p>
               </div>
-              <div className="role-selector">
+
+              {showForgotPwd ? (
+                <form onSubmit={forgotStep === 1 ? handleVerifyIndex : handleForgotSubmit} className="login-form fade-in">
+                  
+                  {forgotStep === 1 ? (
+                    <div className="input-group slide-top">
+                      <label>Enter Student Index Number</label>
+                      <input
+                        type="text" value={forgotIndex}
+                        onChange={(e) => setForgotIndex(e.target.value)}
+                        placeholder="e.g. 240456R"
+                        required
+                      />
+                    </div>
+                  ) : (
+                    <div className="input-group slide-top">
+                      <label>Verified. Now enter your University Email</label>
+                      <input
+                        type="email" value={forgotEmail}
+                        onChange={(e) => setForgotEmail(e.target.value)}
+                        placeholder="e.g. name.24@uom.lk"
+                        required
+                      />
+                    </div>
+                  )}
+
+                  {forgotError && <p className="error-text bounce-in">{forgotError}</p>}
+                  {forgotMsg && <p className="success-text bounce-in" style={{color: 'var(--success)', background: 'var(--success-light)', padding: '10px', borderRadius: '8px', fontSize: '0.86rem', textAlign: 'center', marginBottom: '16px', fontWeight: '600', border: '1px solid rgba(16, 185, 129, 0.2)'}}>{forgotMsg}</p>}
+                  
+                  <button type="submit" className="btn-primary login-submit-btn" disabled={isVerifyingForgot}>
+                    {forgotStep === 1 ? (isVerifyingForgot ? 'Checking...' : 'Verify Student') : 'Send Reset Link'} <span className="arrow">→</span>
+                  </button>
+
+                  <div style={{textAlign: 'center', marginTop: '16px'}}>
+                    <a href="#" onClick={(e) => { e.preventDefault(); setShowForgotPwd(false); setForgotStep(1); setForgotIndex(''); setForgotEmail(''); setForgotError(''); setForgotMsg(''); }} style={{color: 'var(--blue)', fontSize: '0.86rem', textDecoration: 'none', fontWeight: '600'}}>
+                      ← Back to Login
+                    </a>
+                  </div>
+                </form>
+              ) : (
+                <>
+                  <div className="role-selector">
                 {['Student', 'Doctor', 'Lab Assistant'].map(r => (
                   <button
                     key={r}
@@ -275,12 +378,23 @@ function App() {
                   </div>
                 </div>
                 {loginError && <p className="error-text bounce-in">{loginError}</p>}
-                <button type="submit" className="btn-primary login-submit-btn">
-                  Access Portal <span className="arrow">→</span>
+                
+                {role === 'Student' && (
+                  <div style={{display: 'flex', justifyContent: 'flex-end', marginBottom: '16px', marginTop: '-6px'}}>
+                    <a href="#" onClick={(e) => { e.preventDefault(); setShowForgotPwd(true); setLoginError(''); }} style={{color: 'var(--blue)', fontSize: '0.82rem', textDecoration: 'none', fontWeight: '600'}}>
+                      Forgot password?
+                    </a>
+                  </div>
+                )}
+
+                <button type="submit" className="btn-primary login-submit-btn" disabled={isLoggingIn}>
+                  {isLoggingIn ? 'Verifying...' : <>Access Portal <span className="arrow">→</span></>}
                 </button>
               </form>
+              </>
+            )}
 
-              <p className="login-footer-note">
+            <p className="login-footer-note">
                 Protected system — authorised personnel only
               </p>
             </div>
@@ -294,15 +408,15 @@ function App() {
   return (
     <div className="app-layout">
       <Toast message={toastMessage} show={showToast} onClose={() => setShowToast(false)} />
-      <ConfirmModal 
-        show={showConfirmModal} 
-        config={confirmConfig} 
-        onCancel={handleCancelConfirm} 
-        onConfirm={handleConfirmAction} 
+      <ConfirmModal
+        show={showConfirmModal}
+        config={confirmConfig}
+        onCancel={handleCancelConfirm}
+        onConfirm={handleConfirmAction}
       />
-      {role === 'Doctor' && <DoctorPortal handleLogout={handleLogout} showAlert={showAlert} showConfirm={showConfirm} />}
+      {role === 'Doctor' && <DoctorPortal username={username} handleLogout={handleLogout} showAlert={showAlert} showConfirm={showConfirm} />}
       {role === 'Student' && <StudentPortal indexNumber={username} handleLogout={handleLogout} showAlert={showAlert} showConfirm={showConfirm} />}
-      {role === 'Lab Assistant' && <LabPortal handleLogout={handleLogout} showAlert={showAlert} showConfirm={showConfirm} />}
+      {role === 'Lab Assistant' && <LabPortal username={username} handleLogout={handleLogout} showAlert={showAlert} showConfirm={showConfirm} />}
     </div>
   );
 }
@@ -418,7 +532,10 @@ function StudentPortal({ indexNumber, handleLogout, showAlert, showConfirm }) {
         setIsFirstTime(false);
       }
       else { setIsFirstTime(true); }
-    } catch (err) { console.error(err); }
+    } catch (err) {
+      console.error(err);
+      setIsFirstTime(true); // Prevent blank crash when fetch throws (e.g., from CORS)
+    }
     finally { setLoading(false); }
   }, [indexNumber]);
 
@@ -441,7 +558,14 @@ function StudentPortal({ indexNumber, handleLogout, showAlert, showConfirm }) {
     setNic(extractVal('NIC No'));
     setFaculty(extractVal('Faculty'));
     setTelNo(extractVal('Student Tel'));
-    setDob(extractVal('Date of Birth'));
+    let parsedDob = extractVal('Date of Birth');
+    if (parsedDob && parsedDob.includes('/')) {
+      const parts = parsedDob.split('/');
+      if (parts.length === 3 && parts[2].length === 4) {
+        parsedDob = `${parts[2]}-${parts[1]}-${parts[0]}`;
+      }
+    }
+    setDob(parsedDob);
     setSex(extractVal('Sex'));
     setReligion(extractVal('Religion'));
     setMaritalStatus(extractVal('Marital Status') || 'Single');
@@ -565,35 +689,7 @@ Approval Status: Pending`;
     finally { setSubmitting(false); }
   };
 
-  const handleDobChange = (e) => {
-    let input = e.target.value.replace(/\D/g, ''); // Remove non-digits
-    
-    // Extract first 4 digits of NIC (if it looks like a 12-digit NIC starting with 19 or 20)
-    let yearFromNic = '';
-    if (nic && nic.length === 12 && (nic.startsWith('19') || nic.startsWith('20'))) {
-      yearFromNic = nic.substring(0, 4);
-    }
-
-    if (input.length > 8) input = input.substring(0, 8); // Max 8 digits
-
-    let formatted = input;
-    
-    // Auto insert first slash
-    if (input.length >= 2) {
-      formatted = input.substring(0, 2) + '/';
-      if (input.length > 2) {
-        // Auto insert second slash
-        formatted += input.substring(2, 4) + '/';
-        if (input.length > 4) {
-          formatted += input.substring(4, 8);
-        } else if (input.length === 4 && yearFromNic) {
-           // Auto fill year if NIC is provided
-           formatted += yearFromNic;
-        }
-      }
-    }
-    setDob(formatted);
-  };
+  // handleDobChange has been removed in favor of native date input
 
   if (loading) return <Loader />;
 
@@ -669,12 +765,10 @@ Approval Status: Pending`;
                 <div className="input-group"><label>Student Tel No</label><input type="text" value={telNo} onChange={e => setTelNo(e.target.value)} placeholder="e.g. 0771234567" /></div>
                 <div className="input-group">
                   <label>Date of Birth *</label>
-                  <input 
-                    type="text" 
-                    value={dob} 
-                    onChange={handleDobChange} 
-                    placeholder="dd/mm/yyyy" 
-                    maxLength="10"
+                  <input
+                    type="date"
+                    value={dob}
+                    onChange={e => setDob(e.target.value)}
                   />
                 </div>
                 <div className="input-group">
@@ -708,7 +802,16 @@ Approval Status: Pending`;
               <div className="setup-nav-row">
                 <div />
                 <button className="btn-primary" style={{ width: 'auto', padding: '12px 32px' }}
-                  onClick={() => { const needName = isFirstTime && !fullName.trim(); if (needName || !nic.trim() || !faculty.trim() || !dob || !sex) { showAlert('Please fill all required fields (*)'); return; } setStep(2); }}>
+                  onClick={() => { 
+                    const needName = isFirstTime && !fullName.trim(); 
+                    if (needName || !nic.trim() || !faculty.trim() || !dob || !sex) { showAlert('Please fill all required fields (*)'); return; } 
+                    
+                    if (!/^\d{12}$/.test(nic)) { showAlert('NIC Number must be exactly 12 digits'); return; }
+                    if (telNo && !/^0\d{9}$/.test(telNo)) { showAlert('Student Tel No must be 10 digits starting with 0'); return; }
+                    if (emergTel && !/^0\d{9}$/.test(emergTel)) { showAlert('Emergency Telephone must be 10 digits starting with 0'); return; }
+                    
+                    setStep(2); 
+                  }}>
                   Next: Family History →
                 </button>
               </div>
@@ -848,14 +951,14 @@ Approval Status: Pending`;
   const profStatus = getProfileStatus(records);
   const hasHistory = profStatus.status !== 'New' && profStatus.isComplete;
   const approvalStatus = profStatus.status; // New, Incomplete, Pending, Approved, Rejected
-  
+
   // Extract rejection note if profile is rejected
   let rejectionNote = '';
   if (approvalStatus === 'Rejected' && profStatus.record) {
     const noteMatch = profStatus.record.diagnosis.match(/Rejection Note: (.*?)(?:\n|$)/);
     rejectionNote = noteMatch ? noteMatch[1].trim() : '';
   }
-  
+
   const consultations = records.filter(r => !r.diagnosis?.includes('[LAB REPORT') && !isProfileRecord(r.diagnosis));
   const labReports = records.filter(r => r.diagnosis?.includes('[LAB REPORT'));
 
@@ -901,7 +1004,7 @@ Approval Status: Pending`;
               </button>
             </div>
           )}
-          
+
           {approvalStatus === 'Rejected' && (
             <div className="incomplete-banner" style={{ background: 'var(--red-light)', border: '1px solid var(--red)' }}>
               <div className="incomplete-banner-left">
@@ -930,7 +1033,7 @@ Approval Status: Pending`;
                 </div>
                 <div className="records-scroll">
                   {profStatus.record ? (
-                     <RecordItem record={profStatus.record} />
+                    <RecordItem record={profStatus.record} />
                   ) : (
                     <div className="empty-state-box"><div className="empty-big-icon">📋</div><p>No medical profile submitted yet.</p></div>
                   )}
@@ -993,7 +1096,7 @@ Approval Status: Pending`;
 /* =========================================
    DOCTOR PORTAL
    ========================================= */
-function DoctorPortal({ handleLogout, showAlert, showConfirm }) {
+function DoctorPortal({ username, handleLogout, showAlert, showConfirm }) {
   const [searchId, setSearchId] = useState(() => localStorage.getItem('doctor_last_search') || '');
   const [student, setStudent] = useState(null);
   const [diagnosisDetails, setDiagnosisDetails] = useState('');
@@ -1001,7 +1104,25 @@ function DoctorPortal({ handleLogout, showAlert, showConfirm }) {
   const [isListening, setIsListening] = useState(false);
   const [docActiveTab, setDocActiveTab] = useState('consultations');
   const [activeView, setActiveView] = useState('dashboard');
+  const [doctorName, setDoctorName] = useState(() => localStorage.getItem('auth_name') || 'Doctor');
   const recognitionRef = useRef(null);
+
+  useEffect(() => {
+    if (!username) return;
+    fetch(`${API_BASE_URL}/doctors/${username}`)
+      .then(res => res.json())
+      .then(data => {
+        if (data.name) {
+          let dName = data.name;
+          if (!dName.toLowerCase().startsWith('dr.')) {
+            dName = 'Dr. ' + dName;
+          }
+          setDoctorName(dName);
+          localStorage.setItem('auth_name', dName);
+        }
+      })
+      .catch(console.error);
+  }, [username]);
 
   const fetchStudent = useCallback(async (id) => {
     if (!id) return;
@@ -1073,7 +1194,7 @@ function DoctorPortal({ handleLogout, showAlert, showConfirm }) {
 
   return (
     <div className="dash-layout fade-in">
-      <Sidebar role="Doctor" name="Dr. Smith" onLogout={handleLogout} activeView={activeView} onNavigate={setActiveView} />
+      <Sidebar role="Doctor" name={doctorName} onLogout={handleLogout} activeView={activeView} onNavigate={setActiveView} />
 
       {activeView === 'settings' ? (
         <SettingsPanel role="Doctor" />
@@ -1123,7 +1244,7 @@ function DoctorPortal({ handleLogout, showAlert, showConfirm }) {
                 <div className="stat-card stat-amber">
                   <div className="stat-icon">
                     {getProfileStatus(student.medicalRecords).status === 'Approved' ? '✅' :
-                     getProfileStatus(student.medicalRecords).status === 'Rejected' ? '❌' : '⏳'}
+                      getProfileStatus(student.medicalRecords).status === 'Rejected' ? '❌' : '⏳'}
                   </div>
                   <div>
                     <div className="stat-num" style={{ fontSize: '1.2rem' }}>
@@ -1142,7 +1263,7 @@ function DoctorPortal({ handleLogout, showAlert, showConfirm }) {
               </div>
 
               <div className="content-grid">
-                 {/* LEFT — tabbed history panel */}
+                {/* LEFT — tabbed history panel */}
                 <div className="content-col-wide">
                   <div className="panel">
                     {/* Tab header */}
@@ -1174,8 +1295,8 @@ function DoctorPortal({ handleLogout, showAlert, showConfirm }) {
                       <div className="records-scroll">
                         {docConsultations.length > 0
                           ? [...docConsultations].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)).map((rec, i) => (
-                              <RecordItem key={i} record={rec} />
-                            ))
+                            <RecordItem key={i} record={rec} />
+                          ))
                           : <div className="empty-state-box"><div className="empty-big-icon">📂</div><p>No previous consultation records.</p></div>
                         }
                       </div>
@@ -1186,8 +1307,8 @@ function DoctorPortal({ handleLogout, showAlert, showConfirm }) {
                       <div className="records-scroll">
                         {labReports.length > 0
                           ? [...labReports].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)).map((rec, i) => (
-                              <RecordItem key={i} record={rec} />
-                            ))
+                            <RecordItem key={i} record={rec} />
+                          ))
                           : <div className="empty-state-box"><div className="empty-big-icon">🧪</div><p>No lab reports submitted yet.</p></div>
                         }
                       </div>
@@ -1258,8 +1379,9 @@ function DoctorPortal({ handleLogout, showAlert, showConfirm }) {
 /* =========================================
    LAB PORTAL
    ========================================= */
-function LabPortal({ handleLogout, showAlert, showConfirm }) {
+function LabPortal({ username, handleLogout, showAlert, showConfirm }) {
   const [searchId, setSearchId] = useState(() => localStorage.getItem('lab_last_search') || '');
+  const [labName, setLabName] = useState(() => localStorage.getItem('auth_name') || 'Lab Dept');
   const [student, setStudent] = useState(null);
   const [reportTitle, setReportTitle] = useState('');
   const [fileData, setFileData] = useState(null);
@@ -1270,6 +1392,19 @@ function LabPortal({ handleLogout, showAlert, showConfirm }) {
   const [labProfileEditMode, setLabProfileEditMode] = useState(false);
   const [labProfileText, setLabProfileText] = useState('');
   const [editStep, setEditStep] = useState(1);
+
+  useEffect(() => {
+    if (!username) return;
+    fetch(`${API_BASE_URL}/labassistant/${username}`)
+      .then(res => res.json())
+      .then(data => {
+        if (data.name) {
+          setLabName(data.name);
+          localStorage.setItem('auth_name', data.name);
+        }
+      })
+      .catch(console.error);
+  }, [username]);
 
   // Edit form fields for Lab Assistant
   const [eFullName, setEFullName] = useState('');
@@ -1318,19 +1453,7 @@ function LabPortal({ handleLogout, showAlert, showConfirm }) {
   const [rejectionReason, setRejectionReason] = useState('');
   const [pendingRejectionAction, setPendingRejectionAction] = useState(null);
 
-  const handleEditDobChange = (e) => {
-    let input = e.target.value.replace(/\D/g, '');
-    if (input.length > 8) input = input.substring(0, 8);
-    let formatted = input;
-    if (input.length >= 2) {
-      formatted = input.substring(0, 2) + '/';
-      if (input.length > 2) {
-        formatted += input.substring(2, 4) + '/';
-        if (input.length > 4) formatted += input.substring(4, 8);
-      }
-    }
-    setEDob(formatted);
-  };
+  // handleEditDobChange has been removed in favor of native date input
 
 
   const fetchStudent = useCallback(async (id) => {
@@ -1443,21 +1566,21 @@ function LabPortal({ handleLogout, showAlert, showConfirm }) {
         if (!finalDiagnosis.includes('Approval Status:')) {
           // If old record has no status line, insert before attachments or at end
           if (finalDiagnosis.includes('[FILE_ATTACHMENT:')) {
-              finalDiagnosis = finalDiagnosis.replace('[FILE_ATTACHMENT:', `Approval Status: Approved\n[FILE_ATTACHMENT:`);
+            finalDiagnosis = finalDiagnosis.replace('[FILE_ATTACHMENT:', `Approval Status: Approved\n[FILE_ATTACHMENT:`);
           } else {
-              finalDiagnosis += '\nApproval Status: Approved';
+            finalDiagnosis += '\nApproval Status: Approved';
           }
         } else {
           finalDiagnosis = finalDiagnosis.replace(/Approval Status: (Pending|Rejected|Approved)/, 'Approval Status: Approved');
         }
         await updateProfileRecord(finalDiagnosis, actionStr);
-      } 
+      }
       else if (actionStr === 'Reject') {
         setRejectionReason('');
-        setPendingRejectionAction({finalDiagnosis});
+        setPendingRejectionAction({ finalDiagnosis });
         setShowRejectionModal(true);
         return;
-      } 
+      }
       else if (actionStr === 'Delete') {
         showConfirm(
           "Are you sure you want to completely DELETE this student's profile? They will have to re-register and re-upload everything.",
@@ -1471,6 +1594,15 @@ function LabPortal({ handleLogout, showAlert, showConfirm }) {
         return; // Action handled in callback
       }
       else if (actionStr === 'SaveEdit') {
+        const needName = !eFullName.trim();
+        if (needName || !eNic.trim() || !eFaculty.trim() || !eDob || !eSex) { 
+          showAlert('Please fill all required fields (*)'); 
+          return; 
+        }
+        if (!/^\d{12}$/.test(eNic)) { showAlert('NIC Number must be exactly 12 digits'); return; }
+        if (eTelNo && !/^0\d{9}$/.test(eTelNo)) { showAlert('Student Tel No must be 10 digits starting with 0'); return; }
+        if (eEmergTel && !/^0\d{9}$/.test(eEmergTel)) { showAlert('Emergency Telephone must be 10 digits starting with 0'); return; }
+
         let profileRecord = `[PAST HISTORY]
 === PERSONAL INFORMATION ===
 Full Name: ${eFullName || 'N/A'}\nNIC No: ${eNic || 'N/A'}\nFaculty: ${eFaculty || 'N/A'}\nStudent Tel: ${eTelNo || 'N/A'}\nDate of Birth: ${eDob || 'N/A'}\nSex: ${eSex || 'N/A'}\nReligion: ${eReligion || 'N/A'}\nMarital Status: ${eMaritalStatus || 'Single'}\nNationality: ${eNationality || 'N/A'}\nLast School: ${eLastSchool || 'N/A'}\nSiblings: ${eSiblings || '0'}\nFather's Occupation: ${eFatherOcc || 'N/A'}\nMother's Occupation: ${eMotherOcc || 'N/A'}\nHome Address: ${eHomeAddress || 'N/A'}\nExtracurricular: ${eExtracurricular || 'N/A'}
@@ -1527,7 +1659,14 @@ BCC: ${eVacBCC || 'Not recorded'}\nDPT: ${eVacDPT || 'Not recorded'}\nMR/MMR: ${
     setENic(extractVal('NIC No'));
     setEFaculty(extractVal('Faculty'));
     setETelNo(extractVal('Student Tel'));
-    setEDob(extractVal('Date of Birth'));
+    let parsedDob = extractVal('Date of Birth');
+    if (parsedDob && parsedDob.includes('/')) {
+      const parts = parsedDob.split('/');
+      if (parts.length === 3 && parts[2].length === 4) {
+        parsedDob = `${parts[2]}-${parts[1]}-${parts[0]}`;
+      }
+    }
+    setEDob(parsedDob);
     setESex(extractVal('Sex'));
     setEReligion(extractVal('Religion'));
     setEMaritalStatus(extractVal('Marital Status') || 'Single');
@@ -1576,7 +1715,7 @@ BCC: ${eVacBCC || 'Not recorded'}\nDPT: ${eVacDPT || 'Not recorded'}\nMR/MMR: ${
 
   return (
     <div className="dash-layout fade-in">
-      <Sidebar role="Lab Assistant" name="Lab Dept" onLogout={handleLogout} activeView={activeView} onNavigate={setActiveView} />
+      <Sidebar role="Lab Assistant" name={labName} onLogout={handleLogout} activeView={activeView} onNavigate={setActiveView} />
 
       {activeView === 'settings' ? (
         <SettingsPanel role="Lab Assistant" />
@@ -1588,15 +1727,17 @@ BCC: ${eVacBCC || 'Not recorded'}\nDPT: ${eVacDPT || 'Not recorded'}\nMR/MMR: ${
             </div>
           </div>
 
-          {/* STAT ROW */}
           <div className="stat-row">
             <div className="stat-card stat-blue">
               <div className="stat-icon">🧪</div>
               <div><div className="stat-num">Lab</div><div className="stat-label">Department</div></div>
             </div>
             <div className="stat-card stat-green">
-              <div className="stat-icon">✅</div>
-              <div><div className="stat-num">{student ? '1' : '0'}</div><div className="stat-label">Student Verified</div></div>
+              <div className="stat-icon">{student ? '👤' : '🔍'}</div>
+              <div>
+                <div className="stat-num">{student ? student.indexNumber : 'None'}</div>
+                <div className="stat-label">Active Student</div>
+              </div>
             </div>
           </div>
 
@@ -1643,7 +1784,7 @@ BCC: ${eVacBCC || 'Not recorded'}\nDPT: ${eVacDPT || 'Not recorded'}\nMR/MMR: ${
             {student && (
               <div className="lab-form-body slide-top">
                 <div className="verified-badge">✓ Verified: {student.name} ({student.indexNumber})</div>
-                
+
                 {/* Profile Review Section for Lab Assistant */}
                 {getProfileStatus(student.medicalRecords).record ? (
                   <div className="panel" style={{ marginTop: 20, marginBottom: 20, border: '1px solid var(--b2)', boxShadow: 'none' }}>
@@ -1686,7 +1827,7 @@ BCC: ${eVacBCC || 'Not recorded'}\nDPT: ${eVacDPT || 'Not recorded'}\nMR/MMR: ${
                                 <div className="input-group"><label>Student Tel No</label><input type="text" value={eTelNo} onChange={e => setETelNo(e.target.value)} /></div>
                                 <div className="input-group">
                                   <label>Date of Birth *</label>
-                                  <input type="text" value={eDob} onChange={handleEditDobChange} placeholder="dd/mm/yyyy" maxLength="10" />
+                                  <input type="date" value={eDob} onChange={e => setEDob(e.target.value)} />
                                 </div>
                                 <div className="input-group">
                                   <label>Sex *</label>
@@ -1708,7 +1849,7 @@ BCC: ${eVacBCC || 'Not recorded'}\nDPT: ${eVacDPT || 'Not recorded'}\nMR/MMR: ${
                                 <div className="input-group"><label>Mother's Occupation</label><input type="text" value={eMotherOcc} onChange={e => setEMotherOcc(e.target.value)} /></div>
                               </div>
                               <div className="input-group"><label>Home Address, District, Telephone</label><textarea rows="2" value={eHomeAddress} onChange={e => setEHomeAddress(e.target.value)} /></div>
-                
+
                               <h3 className="section-heading" style={{ marginTop: 24 }}>Emergency Contact</h3>
                               <div className="form-grid-2">
                                 <div className="input-group"><label>Contact Name</label><input type="text" value={eEmergName} onChange={e => setEEmergName(e.target.value)} /></div>
@@ -1861,17 +2002,17 @@ BCC: ${eVacBCC || 'Not recorded'}\nDPT: ${eVacDPT || 'Not recorded'}\nMR/MMR: ${
               <button className="uni-confirm-btn cancel" onClick={() => { setShowRejectionModal(false); setRejectionReason(''); setPendingRejectionAction(null); }}>
                 Cancel
               </button>
-              <button className="uni-confirm-btn confirm" onClick={() => { 
+              <button className="uni-confirm-btn confirm" onClick={() => {
                 if (pendingRejectionAction) {
                   let updatedDiagnosis = pendingRejectionAction.finalDiagnosis;
                   if (!updatedDiagnosis.includes('Approval Status:')) {
-                      if (updatedDiagnosis.includes('[FILE_ATTACHMENT:')) {
-                          updatedDiagnosis = updatedDiagnosis.replace('[FILE_ATTACHMENT:', `Approval Status: Rejected\n[FILE_ATTACHMENT:`);
-                      } else {
-                          updatedDiagnosis += '\nApproval Status: Rejected';
-                      }
+                    if (updatedDiagnosis.includes('[FILE_ATTACHMENT:')) {
+                      updatedDiagnosis = updatedDiagnosis.replace('[FILE_ATTACHMENT:', `Approval Status: Rejected\n[FILE_ATTACHMENT:`);
+                    } else {
+                      updatedDiagnosis += '\nApproval Status: Rejected';
+                    }
                   } else {
-                      updatedDiagnosis = updatedDiagnosis.replace(/Approval Status: (Pending|Rejected|Approved)/, 'Approval Status: Rejected');
+                    updatedDiagnosis = updatedDiagnosis.replace(/Approval Status: (Pending|Rejected|Approved)/, 'Approval Status: Rejected');
                   }
                   if (rejectionReason.trim()) updatedDiagnosis += `\nRejection Note: ${rejectionReason}`;
                   updateProfileRecord(updatedDiagnosis, 'Reject');
@@ -1947,20 +2088,35 @@ function SettingsPanel({ role }) {
   const [showNew, setShowNew] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
 
-  const handleChange = (e) => {
+  const handleChange = async (e) => {
     e.preventDefault();
     setMsg(null);
-    const stored = localStorage.getItem(`pwd_${role}`);
-    const active = stored || defaults[role];
-    if (currentPwd !== active) { setMsg({ type: 'error', text: 'Current password is incorrect.' }); return; }
     if (newPwd.length < 6) { setMsg({ type: 'error', text: 'New password must be at least 6 characters.' }); return; }
     if (newPwd === currentPwd) { setMsg({ type: 'error', text: 'New password must be different from the current password.' }); return; }
     if (newPwd !== confirmPwd) { setMsg({ type: 'error', text: 'Passwords do not match.' }); return; }
-    localStorage.setItem(`pwd_${role}`, newPwd);
-    setMsg({ type: 'success', text: '✓ Password changed! Use your new password the next time you log in.' });
-    setCurrentPwd('');
-    setNewPwd('');
-    setConfirmPwd('');
+
+    const userId = localStorage.getItem('auth_username');
+    let endpoint = '';
+    if (role === 'Student') endpoint = `/student/${userId}/password`;
+    else if (role === 'Doctor') endpoint = `/doctors/${userId}/password`;
+    else if (role === 'Lab Assistant') endpoint = `/labassistant/${userId}/password`;
+
+    try {
+      const res = await fetch(`${API_BASE_URL}${endpoint}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ oldPassword: currentPwd, newPassword: newPwd })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setMsg({ type: 'success', text: '✓ Password changed successfully! Use your new password on the next login.' });
+        setCurrentPwd(''); setNewPwd(''); setConfirmPwd('');
+      } else {
+        setMsg({ type: 'error', text: data.error || 'Failed to update password.' });
+      }
+    } catch {
+      setMsg({ type: 'error', text: 'Network error. Could not connect to the server.' });
+    }
   };
 
   return (
@@ -2092,32 +2248,32 @@ function RecordItem({ record }) {
 
   const renderProfileSections = (text) => {
     if (!text) return null;
-    
+
     // Split into sections based on '===' headers
     const sectionsRaw = text.split(/===(.*?)===/g);
-    
+
     // sectionsRaw[0] will contain anything before the first '===' (e.g. '[PAST HISTORY]')
     // sectionsRaw[1] will be the first header name, sectionsRaw[2] the content, and so on...
-    
+
     const elements = [];
-    
+
     // Check if there's any important info before the first section
     const introText = sectionsRaw[0].trim();
     if (introText && introText !== '[PAST HISTORY]' && introText !== '[PROFILE DELETED]') {
-        elements.push(<p key="intro" style={{ marginBottom: 12 }}>{introText.replace('[PAST HISTORY]', '').trim()}</p>);
+      elements.push(<p key="intro" style={{ marginBottom: 12 }}>{introText.replace('[PAST HISTORY]', '').trim()}</p>);
     }
 
     if (text.includes('[PROFILE DELETED]')) {
-         elements.push(<div key="deleted" className="error-text" style={{marginTop: 10}}>This student profile has been completely deleted.</div>);
-         return elements;
+      elements.push(<div key="deleted" className="error-text" style={{ marginTop: 10 }}>This student profile has been completely deleted.</div>);
+      return elements;
     }
 
     for (let i = 1; i < sectionsRaw.length; i += 2) {
       const sectionName = sectionsRaw[i].trim();
       const sectionContent = sectionsRaw[i + 1] ? sectionsRaw[i + 1].trim() : '';
-      
+
       if (!sectionContent) continue;
-      
+
       const lines = sectionContent.split('\n');
       const fields = [];
       let currentField = null;
@@ -2126,13 +2282,13 @@ function RecordItem({ record }) {
       for (const line of lines) {
         if (!line.trim()) continue;
         const colIdx = line.indexOf(':');
-        
+
         // Exclude Approval Status if it's mixed in the last section, we render it separately if needed or as a field.
         if (line.startsWith('Approval Status:')) {
-            fields.push({ key: 'Approval Status', value: line.substring(16).trim() });
-            continue;
+          fields.push({ key: 'Approval Status', value: line.substring(16).trim() });
+          continue;
         }
-        
+
         if (colIdx > 0 && colIdx < 40) { // arbitrary max key length guard
           if (currentField) fields.push(currentField);
           currentField = {
@@ -2143,8 +2299,8 @@ function RecordItem({ record }) {
           // If a line doesn't have a colon, append it to the previous value (multi-line value)
           currentField.value += ' ' + line.trim();
         } else {
-           // No current field and no colon, just push as a raw field
-           fields.push({ key: '', value: line.trim() });
+          // No current field and no colon, just push as a raw field
+          fields.push({ key: '', value: line.trim() });
         }
       }
       if (currentField) fields.push(currentField);
@@ -2165,12 +2321,12 @@ function RecordItem({ record }) {
         );
       }
     }
-    
+
     // Fallback: If no '===' sections were found (legacy record), render it as plain text
     if (elements.length === 0 && introText) {
-       return <p style={{ whiteSpace: 'pre-wrap' }}>{text}</p>;
+      return <p style={{ whiteSpace: 'pre-wrap' }}>{text}</p>;
     }
-    
+
     return elements;
   };
 
@@ -2182,9 +2338,9 @@ function RecordItem({ record }) {
       </div>
       <div className="record-body">
         {isHistory ? (
-           <div style={{ marginTop: 10 }}>{renderProfileSections(displayText)}</div>
+          <div style={{ marginTop: 10 }}>{renderProfileSections(displayText)}</div>
         ) : (
-           <p style={{ whiteSpace: 'pre-wrap' }}><strong>Notes:</strong><br />{displayText}</p>
+          <p style={{ whiteSpace: 'pre-wrap' }}><strong>Notes:</strong><br />{displayText}</p>
         )}
 
         {attachedFile && (
