@@ -161,7 +161,7 @@ const CustomSelect = ({ value, options, onChange, placeholder = "Select..." }) =
 };
 
 function App() {
-  const [role, setRole] = useState(() => localStorage.getItem('auth_role') || 'Doctor');
+  const [role, setRole] = useState(() => localStorage.getItem('auth_role') || 'Student');
   const [username, setUsername] = useState(() => localStorage.getItem('auth_username') || '');
   const [password, setPassword] = useState('');
   const [isLoggedIn, setIsLoggedIn] = useState(() => localStorage.getItem('auth_loggedIn') === 'true');
@@ -340,6 +340,8 @@ function App() {
     setIsLoggedIn(false);
     setUsername('');
     setPassword('');
+    setRole('Student');
+    setActiveSection(0);
     localStorage.removeItem('auth_loggedIn');
     localStorage.removeItem('auth_role');
     localStorage.removeItem('auth_username');
@@ -1527,12 +1529,34 @@ function MedicineInput({ medicines, onChange }) {
                 <option>As needed</option>
               </optgroup>
             </select>
-            <input
-              className="med-mini-input"
-              placeholder="Duration (e.g. 5 days)"
+            <select
+              className="med-mini-input med-mini-select"
               value={med.duration}
               onChange={e => updateMed(idx, 'duration', e.target.value)}
-            />
+            >
+              <option value="">Duration...</option>
+              <optgroup label="Days">
+                <option value="1 day">1 day</option>
+                <option value="2 days">2 days</option>
+                <option value="3 days">3 days</option>
+                <option value="4 days">4 days</option>
+                <option value="5 days">5 days</option>
+                <option value="7 days">7 days</option>
+                <option value="10 days">10 days</option>
+                <option value="14 days">14 days</option>
+              </optgroup>
+              <optgroup label="Long Term">
+                <option value="1 month">1 month</option>
+                <option value="2 months">2 months</option>
+                <option value="3 months">3 months</option>
+                <option value="Until finished">Until finished</option>
+                <option value="Continually">Continually</option>
+              </optgroup>
+              <optgroup label="Other">
+                <option value="As needed">As needed (SOS)</option>
+                <option value="Stat">Stat (Immediately)</option>
+              </optgroup>
+            </select>
           </div>
         </div>
       ))}
@@ -1694,9 +1718,17 @@ function DoctorPortal({ username, handleLogout, showAlert, showConfirm }) {
       return;
     }
     // Build structured prescription text from medicine cards
-    const medLines = medicines.map(m =>
-      `• ${m.name}${m.dosage ? ` — ${m.dosage}` : ''}${m.frequency ? `, ${m.frequency}` : ''}${m.duration ? ` for ${m.duration}` : ''}`
-    ).join('\n');
+    const medLines = medicines.map(m => {
+      let dur = '';
+      if (m.duration) {
+        if (m.duration.includes('Until') || m.duration.includes('Continually') || m.duration.includes('As needed') || m.duration.includes('Stat')) {
+          dur = ` (${m.duration.split(' ')[0] === 'As' ? 'As needed' : m.duration})`; /* Clean up (SOS) for display */
+        } else {
+          dur = ` (for ${m.duration})`;
+        }
+      }
+      return `• ${m.name}${m.dosage ? ` — ${m.dosage}` : ''}${m.frequency ? `, ${m.frequency}` : ''}${dur}`;
+    }).join('\n');
     const symptomLine = selectedSymptoms.length ? `Symptoms: ${selectedSymptoms.join(', ')}` : '';
     const fullDiagnosis = [
       `[Visit Type: ${visitType}] [Severity: ${severity}]`,
@@ -3219,14 +3251,16 @@ function Sidebar({ role, name, onLogout, activeView, onNavigate, profilePhoto })
           className={`s-nav-item ${activeView === 'dashboard' ? 'active' : ''}`}
           onClick={() => onNavigate('dashboard')}
         >
-          <span className="s-nav-icon">⊞</span> Dashboard
+          <span className="s-nav-icon">⊞</span>
+          <span className="s-nav-label">Dashboard</span>
         </button>
         {role === 'Lab Assistant' && (
           <button
             className={`s-nav-item ${activeView === 'pending-approvals' ? 'active' : ''}`}
             onClick={() => onNavigate('pending-approvals')}
           >
-            <span className="s-nav-icon">⏳</span> Pending Approvals
+            <span className="s-nav-icon">⏳</span>
+            <span className="s-nav-label">Approvals</span>
           </button>
         )}
         {(role === 'Doctor' || role === 'Lab Assistant') && (
@@ -3234,14 +3268,24 @@ function Sidebar({ role, name, onLogout, activeView, onNavigate, profilePhoto })
             className={`s-nav-item ${activeView === 'logs' ? 'active' : ''}`}
             onClick={() => onNavigate('logs')}
           >
-            <span className="s-nav-icon">📊</span> Logs
+            <span className="s-nav-icon">📊</span>
+            <span className="s-nav-label">Logs</span>
           </button>
         )}
         <button
           className={`s-nav-item ${activeView === 'settings' ? 'active' : ''}`}
           onClick={() => onNavigate('settings')}
         >
-          <span className="s-nav-icon">⚙</span> Settings
+          <span className="s-nav-icon">⚙</span>
+          <span className="s-nav-label">Settings</span>
+        </button>
+        {/* Mobile-only sign out — hidden on desktop via CSS */}
+        <button
+          className="s-nav-item mobile-logout-btn"
+          onClick={onLogout}
+        >
+          <span className="s-nav-icon">🚪</span>
+          <span className="s-nav-label">Sign Out</span>
         </button>
       </nav>
 
@@ -3489,6 +3533,72 @@ function RecordItem({ record }) {
     return elements;
   };
 
+  const renderConsultationData = (text) => {
+    if (!text) return null;
+    
+    // Check if it matches the current structured format saved by the Doctor Portal
+    if (text.includes('[Visit Type:') || text.includes('Symptoms:')) {
+      let visitType = 'General';
+      let severity = 'Not Specified';
+      let symptoms = 'None recorded';
+      let notes = text;
+      
+      const typeMatch = text.match(/\[Visit Type: (.*?)\]/);
+      if (typeMatch) visitType = typeMatch[1];
+      
+      const sevMatch = text.match(/\[Severity: (.*?)\]/);
+      if (sevMatch) severity = sevMatch[1];
+      
+      const sympMatch = text.match(/Symptoms: (.*?)(?=\nNotes:|\n\[|$)/);
+      if (sympMatch) symptoms = sympMatch[1].trim();
+      
+      const notesMatch = text.match(/Notes: ([\s\S]*)/);
+      if (notesMatch) notes = notesMatch[1].trim();
+      else if (typeMatch || sevMatch || sympMatch) {
+         notes = text.replace(/\[Visit Type: .*?\]|\[Severity: .*?\]|Symptoms: .*?(?=\n|$)/g, '').trim();
+      }
+
+      const getSeverityClass = (sev) => {
+        const s = sev.toLowerCase();
+        if (s.includes('mild')) return 'severity-mild';
+        if (s.includes('moderate')) return 'severity-moderate';
+        if (s.includes('severe')) return 'severity-severe';
+        return 'severity-mild'; // default styling if unknown
+      };
+
+      return (
+        <div className="consult-grid">
+          <div className="consult-row">
+            <span className="consult-lbl">Visit Type</span>
+            <span className="consult-val">{visitType}</span>
+          </div>
+          <div className="consult-row">
+            <span className="consult-lbl">Severity</span>
+            <span className={`consult-val severity-badge ${getSeverityClass(severity)}`}>{severity}</span>
+          </div>
+          <div className="consult-row">
+            <span className="consult-lbl">Symptoms</span>
+            <span className="consult-val">{symptoms}</span>
+          </div>
+          <div className="consult-row consult-notes">
+            <span className="consult-lbl">Clinical Notes</span>
+            <span className="consult-val" style={{ whiteSpace: 'pre-wrap' }}>{notes || 'No further notes provided.'}</span>
+          </div>
+        </div>
+      );
+    }
+    
+    // Fallback for older free-text format or unrecognised notes
+    return (
+      <div className="consult-grid">
+        <div className="consult-row consult-notes">
+          <span className="consult-lbl">Notes</span>
+          <span className="consult-val" style={{ whiteSpace: 'pre-wrap' }}>{text}</span>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <>
       <div className={`record-item ${typeClass}`}>
@@ -3500,7 +3610,7 @@ function RecordItem({ record }) {
           {isHistory ? (
             <div style={{ marginTop: 10 }}>{renderProfileSections(displayText)}</div>
           ) : (
-            <p style={{ whiteSpace: 'pre-wrap' }}><strong>Notes:</strong><br />{displayText}</p>
+            renderConsultationData(displayText)
           )}
 
           {attachedFile && (
@@ -3522,7 +3632,10 @@ function RecordItem({ record }) {
           )}
 
           {record.prescription && record.prescription !== 'N/A' && (
-            <p style={{ marginTop: 8 }}><strong>Prescription:</strong> {record.prescription}</p>
+            <div className="consult-prescription">
+               <span className="consult-lbl">Prescription</span>
+               <span className="consult-val" style={{ whiteSpace: 'pre-wrap', lineHeight: '1.6' }}>{record.prescription}</span>
+            </div>
           )}
         </div>
       </div>
