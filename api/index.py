@@ -1,64 +1,158 @@
 import os
+import random
+import smtplib
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from pymongo import MongoClient
 from datetime import datetime
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__)
 CORS(app)
 
-MONGO_URI = os.environ.get("MONGO_URI")
-client = MongoClient(MONGO_URI)
-db = client["unimed_db"]
+# Database Configuration
+MONGO_URI = os.environ.get("MONGO_URI", "mongodb+srv://morashiftuom_db_user:I4bv4bmEr2jyazJ4@morashift.jqcplby.mongodb.net/?appName=morashift")
 
-students_collection      = db["students"]
-doctors_collection       = db["doctors"]
-labassistants_collection = db["labassistants"]
+_client = None
+_db = None
+students_collection = None
+doctors_collection = None
+labassistants_collection = None
 
-# ─────────────────────────────────────────────
-#  Hash indexes for O(1) lookup speed
-# ─────────────────────────────────────────────
-students_collection.create_index("indexNumber", unique=True)
-doctors_collection.create_index("doctorId",     unique=True)
-labassistants_collection.create_index("labId",  unique=True)
+# Global storage to remember OTP codes for verification
+otp_storage = {}
 
+def _init_db():
+    global _client, _db, students_collection, doctors_collection, labassistants_collection
+    if _db is not None:
+        return
+    if not MONGO_URI:
+        raise RuntimeError("MONGO_URI is not set.")
+    _client = MongoClient(MONGO_URI)
+    _db = _client["unimed_db"]
+    students_collection = _db["students"]
+    doctors_collection = _db["doctors"]
+    labassistants_collection = _db["labassistants"]
+    students_collection.create_index("indexNumber", unique=True)
+    doctors_collection.create_index("doctorId", unique=True)
+    labassistants_collection.create_index("labId", unique=True)
 
-# ─────────────────────────────────────────────
-#  Helper: verify password (handles plain-text
-#  legacy passwords and auto-upgrades to hash)
-# ─────────────────────────────────────────────
+@app.before_request
+def ensure_db():
+    try:
+        _init_db()
+    except RuntimeError as e:
+        from flask import abort
+        app.logger.error(str(e))
+        abort(500, description=str(e))
 
+# --- DATABASE HELPERS ---
 def _verify_and_upgrade(collection, query, field, incoming_password):
-    """
-    Returns (True, doc) if password matches, (False, doc) otherwise.
-    If the stored value is plain-text and matches, it is transparently
-    upgraded to a bcrypt hash in the DB.
-    """
     doc = collection.find_one(query)
     if not doc:
         return False, None
     stored = doc.get(field, "")
-
-    # Check if stored value is already a werkzeug hash
     if stored.startswith("pbkdf2:") or stored.startswith("scrypt:"):
         ok = check_password_hash(stored, incoming_password)
     else:
-        # Legacy plain-text — compare directly, then upgrade
         ok = (stored == incoming_password)
         if ok:
             new_hash = generate_password_hash(incoming_password)
             collection.update_one(query, {"$set": {field: new_hash}})
-
     return ok, doc
 
+# --- SECURE MAIL SERVER LOGIC ---
 
-# ─────────────────────────────────────────────
-#  STUDENT ENDPOINTS
-# ─────────────────────────────────────────────
+def send_uom_verification(student_email, otp_code):
+    smtp_server = "smtp-relay.brevo.com"
+    port = 465  # Port 465 (SSL) is most stable for Vercel
+    login = "a59fd8001@smtp-brevo.com"
+    
+    # CRITICAL: This pulls the key from your Vercel Environment Variables
+    # Do NOT paste the actual xsmtpsib key here!
+    password = os.environ.get("BREVO_SMTP_KEY") 
+
+    if not password:
+        print("Error: BREVO_SMTP_KEY environment variable not found.")
+        return False
+
+    msg = MIMEMultipart()
+    msg['From'] = "morashiftuom@gmail.com"
+    msg['To'] = student_email
+    msg['Subject'] = "UniMed Registration Code"
+
+    body = f"Hello, your UniMed verification code is: {otp_code}"
+    msg.attach(MIMEText(body, 'plain'))
+
+    try:
+        # SMTP_SSL is used for Port 465
+        server = smtplib.SMTP_SSL(smtp_server, port, timeout=15)
+        server.login(login, password)
+        server.send_message(msg)
+        server.quit()
+        return True
+    except Exception as e:
+        print(f"SMTP Error: {e}")
+        return False
+
+# --- API ROUTES ---
+
+@app.route('/', methods=['GET'])
+def home():
+    return jsonify({"status": "UniMed API is fully operational"}), 200
+
+# --- STUDENT ROUTES ---
+
+@app.route('/student/send-otp', methods=['POST'])
+def handle_otp_request():
+    data = request.get_json()
+    email = data.get('email')
+    
+    if not email or not email.endswith("@uom.lk"):
+        return jsonify({"error": "Only @uom.lk emails are permitted"}), 400
+    
+    # Generate and store OTP in memory
+    otp = str(random.randint(100000, 999999))
+    otp_storage[email] = otp 
+    
+    success = send_uom_verification(email, otp)
+    
+    if success:
+        return jsonify({"message": "OTP sent successfully"}), 200
+    else:
+        return jsonify({"error": "Mail server connection failed. Check Vercel logs."}), 500
+
+@app.route('/student/<index_number>/login', methods=['POST'])
+def student_login(index_number):
+    index_number = index_number.upper()
+    data = request.json
+    incoming_password = data.get("password", "")
+    
+    student = students_collection.find_one({"indexNumber": index_number})
+
+    # Check if the "password" entered is actually a valid OTP
+    for email, saved_otp in otp_storage.items():
+        if incoming_password == saved_otp:
+            if student:
+                return jsonify({"message": "Login successful via OTP", "name": student.get("name", "")}), 200
+            else:
+                return jsonify({"message": "OTP verified, please register", "name": ""}), 200
+
+    if not student:
+        return jsonify({"error": "Student not found"}), 404
+
+    # Regular Password Verification
+    ok, student = _verify_and_upgrade(students_collection, {"indexNumber": index_number}, "password", incoming_password)
+    
+    if ok:
+        return jsonify({"message": "Login successful", "name": student.get("name", "")}), 200
+    return jsonify({"error": "Incorrect password or OTP"}), 401
 
 @app.route('/student/<index_number>', methods=['GET'])
 def retrieve_student(index_number):
+    index_number = index_number.upper()
     student = students_collection.find_one({"indexNumber": index_number}, {"_id": 0, "password": 0})
     if student:
         return jsonify(student), 200
@@ -66,78 +160,38 @@ def retrieve_student(index_number):
 
 @app.route('/student/<index_number>/record', methods=['POST'])
 def save_visit_details(index_number):
+    index_number = index_number.upper()
     data = request.json
     new_record = {
-        "diagnosis":    data.get("diagnosis", ""),
+        "diagnosis": data.get("diagnosis", ""),
         "prescription": data.get("prescription", ""),
-        "timestamp":    datetime.now()
+        "timestamp": datetime.now()
     }
-    result = students_collection.update_one(
-        {"indexNumber": index_number},
-        {"$push": {"medicalRecords": new_record}}
-    )
-    if result.matched_count > 0:
-        return jsonify({"message": "Success"}), 200
-    return jsonify({"error": "Not found"}), 404
+    result = students_collection.update_one({"indexNumber": index_number}, {"$push": {"medicalRecords": new_record}})
+    return jsonify({"message": "Success"}) if result.matched_count > 0 else jsonify({"error": "Not found"}), 404
 
 @app.route('/student', methods=['POST'])
 def register_student():
     data = request.json
-    index_number = data.get("indexNumber")
+    index_number = data.get("indexNumber").upper() if data.get("indexNumber") else None
     existing = students_collection.find_one({"indexNumber": index_number})
     if existing:
-        students_collection.update_one(
-            {"indexNumber": index_number},
-            {"$set": {"name": data.get("name", existing.get("name", ""))}}
-        )
+        students_collection.update_one({"indexNumber": index_number}, {"$set": {"name": data.get("name", existing.get("name", ""))}})
         return jsonify({"message": "Updated"}), 200
-    new_student = {
-        "indexNumber":    index_number,
-        "name":           data.get("name", ""),
-        "password":       generate_password_hash("student123"),   # hashed default
-        "medicalRecords": []
-    }
+    new_student = {"indexNumber": index_number, "name": data.get("name", ""), "password": generate_password_hash("student123"), "medicalRecords": []}
     students_collection.insert_one(new_student)
     return jsonify({"message": "Created"}), 201
 
-@app.route('/student/<index_number>/login', methods=['POST'])
-def student_login(index_number):
-    data = request.json
-    ok, student = _verify_and_upgrade(
-        students_collection,
-        {"indexNumber": index_number},
-        "password",
-        data.get("password", "")
-    )
-    if student is None:
-        return jsonify({"error": "Not found"}), 404
-    if ok:
-        return jsonify({"message": "Login successful", "name": student.get("name", "")}), 200
-    return jsonify({"error": "Incorrect password"}), 401
-
 @app.route('/student/<index_number>/password', methods=['PUT'])
 def update_student_password(index_number):
+    index_number = index_number.upper()
     data = request.json
-    ok, student = _verify_and_upgrade(
-        students_collection,
-        {"indexNumber": index_number},
-        "password",
-        data.get("oldPassword", "")
-    )
-    if student is None:
-        return jsonify({"error": "Not found"}), 404
-    if not ok:
-        return jsonify({"error": "Incorrect current password"}), 401
-    students_collection.update_one(
-        {"indexNumber": index_number},
-        {"$set": {"password": generate_password_hash(data.get("newPassword", ""))}}
-    )
+    ok, student = _verify_and_upgrade(students_collection, {"indexNumber": index_number}, "password", data.get("oldPassword", ""))
+    if not ok: return jsonify({"error": "Incorrect password"}), 401
+    students_collection.update_one({"indexNumber": index_number}, {"$set": {"password": generate_password_hash(data.get("newPassword", ""))}})
     return jsonify({"message": "Password updated"}), 200
 
-
-# ─────────────────────────────────────────────
-#  DOCTOR ENDPOINTS
-# ─────────────────────────────────────────────
+# --- DOCTOR ROUTES ---
 
 @app.route('/doctors', methods=['GET'])
 def list_doctors():
@@ -160,9 +214,9 @@ def register_doctor():
     if doctors_collection.find_one({"doctorId": doctor_id}):
         return jsonify({"error": "Doctor ID already exists"}), 409
     new_doctor = {
-        "doctorId":  doctor_id,
-        "name":      data.get("name", ""),
-        "password":  generate_password_hash(data.get("password", "doctor123")),  # hashed
+        "doctorId": doctor_id,
+        "name": data.get("name", ""),
+        "password": generate_password_hash(data.get("password", "doctor123")),
         "createdAt": datetime.now()
     }
     doctors_collection.insert_one(new_doctor)
@@ -202,10 +256,7 @@ def update_doctor_password(doctor_id):
     )
     return jsonify({"message": "Password updated"}), 200
 
-
-# ─────────────────────────────────────────────
-#  LAB ASSISTANT ENDPOINTS
-# ─────────────────────────────────────────────
+# --- LAB ASSISTANT ROUTES ---
 
 @app.route('/labassistant', methods=['GET'])
 def list_labassistants():
@@ -228,9 +279,9 @@ def register_labassistant():
     if labassistants_collection.find_one({"labId": lab_id}):
         return jsonify({"error": "Lab Assistant ID already exists"}), 409
     new_assistant = {
-        "labId":     lab_id,
-        "name":      data.get("name", ""),
-        "password":  generate_password_hash(data.get("password", "lab123")),  # hashed
+        "labId": lab_id,
+        "name": data.get("name", ""),
+        "password": generate_password_hash(data.get("password", "lab123")),
         "createdAt": datetime.now()
     }
     labassistants_collection.insert_one(new_assistant)
@@ -269,9 +320,6 @@ def update_labassistant_password(lab_id):
         {"$set": {"password": generate_password_hash(data.get("newPassword", ""))}}
     )
     return jsonify({"message": "Password updated"}), 200
-
-
-# ─────────────────────────────────────────────
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
