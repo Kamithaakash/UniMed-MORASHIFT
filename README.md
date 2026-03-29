@@ -42,5 +42,3 @@ npm install
 npm run dev
 ```
 
-
-This project is for educational purposes.
