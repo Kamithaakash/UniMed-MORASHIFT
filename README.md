@@ -11,10 +11,10 @@ This repository contains the frontend of the UniMed system.
 * JavaScript
 
 ## Deployment
- - Frontend is deployed using Cloudflare Pages (or Workers).
+ - Frontend is deployed using Cloudflare Pages 
 
 ## Backend
-  -The backend is hosted separately (e.g., Vercel + MongoDB).
+ - The backend is hosted separately (Vercel + MongoDB).
 
 ## ⚙️ Installation & Setup
 
