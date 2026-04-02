@@ -320,6 +320,7 @@ def update_labassistant_password(lab_id):
         {"$set": {"password": generate_password_hash(data.get("newPassword", ""))}}
     )
     return jsonify({"message": "Password updated"}), 200
+print("waiting")
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
