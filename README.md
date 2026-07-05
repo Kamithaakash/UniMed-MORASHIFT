@@ -6,8 +6,8 @@ A medical records management system for university students, built with React (F
 
 ## Repository Links
 
-- **Backend Repository:** [https://github.com/Kamithaakash/UniMed-MORASHIFT](https://github.com/Kamithaakash/UniMed-MORASHIFT)
-- **Frontend Repository:** [https://github.com/Kamithaakash/Unimed-frontend](https://github.com/Kamithaakash/Unimed-frontend)
+- **Backend Repository:** [https://github.com/Kamithaakash/UniMed-MORASHIFT/tree/main/Backend](https://github.com/Kamithaakash/UniMed-MORASHIFT/tree/main/Backend)
+- **Frontend Repository:** [https://github.com/Kamithaakash/UniMed-MORASHIFT/tree/main/Frontend](https://github.com/Kamithaakash/UniMed-MORASHIFT/tree/main/Frontend)
 
 ---
 
