@@ -22,13 +22,13 @@ If you haven't already cloned the repositories, follow these steps:
 **Clone the Backend Repository:**
 ```bash
 git clone https://github.com/Kamithaakash/UniMed-MORASHIFT.git
-cd UniMed-MORASHIFT
+cd UniMed-MORASHIFT/Backend
 ```
 
 **Clone the Frontend Repository:**
 ```bash
-git clone https://github.com/Kamithaakash/Unimed-frontend.git
-cd Unimed-frontend
+git clone https://github.com/Kamithaakash/UniMed-MORASHIFT.git
+cd UniMed-MORASHIFT/Frontend
 ```
 
 Alternatively, if you're already in the project directory, navigate to the appropriate folder using the terminal.
