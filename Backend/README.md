@@ -11,7 +11,7 @@
 
 ## 🔧 Setup Email Service (Brevo SMTP)
 
-### Option 1: Use Brevo (Recommended - FREE)
+### Use Brevo (Recommended - FREE)
 
 1. **Create Account**: Go to [brevo.com](https://www.brevo.com) (formerly Sendinblue)
 2. **Sign up** with any email (it's FREE - 300 emails/day)
@@ -34,27 +34,6 @@
 
 5. **Redeploy**: Click "Redeploy" in Vercel Deployments tab
 
----
-
-### Option 2: Use Gmail SMTP (Alternative)
-
-If you want to use Gmail instead:
-
-1. **Enable 2-Factor Auth** on your Gmail account
-2. **Create App Password**:
-   - Go to: Google Account → Security → 2-Step Verification → App Passwords
-   - Generate password for "Mail"
-3. **Update backend code** (change in `index.py`):
-   ```python
-   smtp_server = "smtp.gmail.com"
-   port = 587
-   login = "your-email@gmail.com"
-   password = os.environ.get("GMAIL_APP_PASSWORD")
-   ```
-4. **Add to Vercel**:
-   ```
-   GMAIL_APP_PASSWORD = (your 16-char app password)
-   ```
 
 ---
 
